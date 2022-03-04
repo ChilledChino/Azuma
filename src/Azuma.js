@@ -1,11 +1,11 @@
-const { isPrimary } = require('cluster');
-const { Util } = require('discord.js');
-const { get, getBeforeSpawn } = require('./Structures.js');
-const { DefaultOptions } = require('./Constants.js');
-const EventEmitter = require('events');
-const AzumaIPC = require('./ratelimits/AzumaIPC.js');
-const AzumaManager = require('./ratelimits/AzumaManager.js');
-const RequestManager = require('./client/RequestManager.js');
+import { isPrimary } from 'cluster';
+import { Util } from 'discord.js';
+import Structures from './Structures.js';
+import Constants from './Constants.js';
+import EventEmitter from 'events';
+import AzumaIPC from './ratelimits/AzumaIPC.js';
+import AzumaManager from './ratelimits/AzumaManager.js';
+import RequestManager from './client/RequestManager.js';
 
 /**
  * Discord.JS Client
@@ -48,8 +48,7 @@ class Azuma extends EventEmitter {
      * @param {string} path The path of your extended Kurasuta "BaseCluster.js"
      * @param {KurasutaOptions} [managerOptions={}] Options to initialize Kurasuta with
      * @param {Object} [ratelimitOptions={}] Options to initialize Azuma with
-     * @param {number} [ratelimitOptions.handlerSweepInterval=120000] Interval for sweeping inactive cached ratelimit buckets, in ms
-     * @param {number} [ratelimitOptions.inactiveTimeout=240000] TTL for unaccessed ratelimit cached hashes and ratelimit info in master process, in ms
+     * @param {number} [ratelimitOptions.inactiveTimeout=240000] TTL for cached hashes, data and handlers. in ms
      * @param {number} [ratelimitOptions.requestOffset=500] Extra time in ms to wait before continuing to make REST requests
      */
     constructor(path, managerOptions = {}, ratelimitOptions = {}) {
@@ -65,12 +64,12 @@ class Azuma extends EventEmitter {
          * Your Kurasuta sharding manager class
          * @type {KurasutaShardingManager}
          */
-        this.manager = new (get('ShardingManager'))(path, managerOptions);
+        this.manager = new (Structures.get('ShardingManager'))(path, managerOptions);
         /**
          * Options for Azuma
          * @type {Object}
          */
-        this.options = Util.mergeDefault(DefaultOptions, ratelimitOptions);
+        this.options = Util.mergeDefault(Constants.DefaultOptions, ratelimitOptions);
         /**
          * Ratelimit cache for all your clusters, null on non primary process
          * @type {AzumaManager|null}
@@ -84,22 +83,26 @@ class Azuma extends EventEmitter {
      */
     async spawn() {
         if (isPrimary) {
-            while(this.manager.ipc.server.status !== 1) await Util.delayFor(1);
+            while(this.manager.ipc.server.status !== 0) await sleep(1);
             await this.manager.ipc.server.close();
             this.manager.ipc.server.removeAllListeners();
             this.manager.ipc = new AzumaIPC(this.manager);
-            while(this.manager.ipc.server.status !== 1) await Util.delayFor(1);
+            while(this.manager.ipc.server.status !== 0) await sleep(1);
             this.ratelimits = new AzumaManager(this);
-            const tasks = getBeforeSpawn();
+            const tasks = Structures.getBeforeSpawn();
             if (tasks.length) await Promise.all(tasks.map(task => task(this.manager)));
             await this.manager.spawn();
             return;
         }
-        const Cluster = require(this.manager.path);
-        const cluster = new Cluster(this.manager);
-        cluster.client.rest = new RequestManager(cluster.client, this.options.handlerSweepInterval);
+        const manager = await import(this.manager.path);
+        const cluster = new manager.default(this.manager);
+        cluster.client.rest = new RequestManager(cluster.client);
         await cluster.init();
     }
 }
 
-module.exports = Azuma;
+function sleep(delay) {
+    return new Promise(resolve => setTimeout(resolve, delay*1000));
+}
+
+export default Azuma;

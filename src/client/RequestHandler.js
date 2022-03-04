@@ -1,10 +1,10 @@
-const { AsyncQueue } = require('@sapphire/async-queue');
-const { resolve } = require('path');
-const { Util, Constants } = require('discord.js');
-const { constructData } = require('../ratelimits/AzumaRatelimit.js');
-const { Events } = require('../Constants.js');
-const HTTPError = require(resolve(require.resolve('discord.js').replace('index.js', '/rest/HTTPError.js')));
-const DiscordAPIError = require(resolve(require.resolve('discord.js').replace('index.js', '/rest/DiscordAPIError.js')));
+import { AsyncQueue } from '@sapphire/async-queue';
+import { Util, Constants as DiscordConstants } from 'discord.js';
+
+import AzumaConstants from '../Constants.js';
+import RequestError from './structures/RequestError.js';
+import DiscordError from './structures/DiscordError.js';
+import AzumaRatelimit from '../ratelimits/AzumaRatelimit.js';
 
 /**
   * The handler for the non-master process that executes the rest requests
@@ -44,9 +44,10 @@ class RequestHandler {
      * @param {Response} res
      * @returns {Promise<Buffer|Object>}
      */
-    static parseResponse(res) {
-        if (res.headers.get('content-type').startsWith('application/json')) return res.json();
-        return res.buffer();
+    static async parseResponse(res) {
+        if (res.headers.get('content-type').startsWith('application/json')) return await res.json();
+        const arrayBuffer = await res.arrayBuffer();
+        return Buffer.from(arrayBuffer);
     }
     /**
      * If this handler is inactive
@@ -81,8 +82,8 @@ class RequestHandler {
         // Get ratelimit data
         const { limited, limit, global, timeout } = await this.manager.fetchInfo(this.id, this.hash, request.route);
         if (global || limited) {
-            if (this.manager.client.listenerCount(Constants.Events.RATE_LIMIT)) 
-                this.manager.client.emit(Constants.Events.RATE_LIMIT, {
+            if (this.manager.client.listenerCount(DiscordConstants.Events.RATE_LIMIT)) 
+                this.manager.client.emit(DiscordConstants.Events.RATE_LIMIT, {
                     method: request.method, 
                     path: request.path, 
                     route: request.route,
@@ -96,21 +97,23 @@ class RequestHandler {
         // Perform the request
         let res;
         try {
-            if (this.manager.listenerCount(Events.ON_REQUEST)) this.manager.emit(Events.ON_REQUEST, { request });
+            if (this.manager.listenerCount(AzumaConstants.Events.ON_REQUEST)) 
+                this.manager.emit(AzumaConstants.Events.ON_REQUEST, { request });
             res = await request.make();
         } catch (error) {
             // Retry the specified number of times for request abortions
             if (request.retries === this.manager.client.options.retryLimit) {
-                throw new HTTPError(error.message, error.constructor.name, error.status, request);
+                throw new RequestError(error.message, error.constructor.name, error.status, request);
             }
             request.retries++;
             return this.execute(request);
         }
-        if (this.manager.listenerCount(Events.ON_RESPONSE)) this.manager.emit(Events.ON_RESPONSE, { request, response: res });
+        if (this.manager.listenerCount(AzumaConstants.Events.ON_RESPONSE)) 
+            this.manager.emit(AzumaConstants.Events.ON_RESPONSE, { request, response: res });
         let after;
         if (res.headers) {
             // Build ratelimit data for master process
-            const data = constructData(request, res.headers);
+            const data = AzumaRatelimit.constructData(request, res.headers);
             // Just incase I messed my ratelimit handling up, so you can avoid getting banned
             after = !isNaN(data.after) ? Number(data.after) * 1000 : -1;
             // Send ratelimit data, and wait for possible global ratelimit manager halt
@@ -125,7 +128,8 @@ class RequestHandler {
         if (res.status >= 400 && res.status < 500) {
             // Handle ratelimited requests
             if (res.status === 429) {
-                if (this.manager.listenerCount(Events.ON_TOO_MANY_REQUEST)) this.manager.emit(Events.ON_TOO_MANY_REQUEST, { request, response: res });
+                if (this.manager.listenerCount(AzumaConstants.Events.ON_TOO_MANY_REQUEST)) 
+                    this.manager.emit(AzumaConstants.Events.ON_TOO_MANY_REQUEST, { request, response: res });
                 // A ratelimit was hit, You did something stupid @saya
                 this.manager.client.emit('debug', 
                     'Encountered unexpected 429 ratelimit\n' + 
@@ -144,15 +148,15 @@ class RequestHandler {
             try {
                 data = await RequestHandler.parseResponse(res);
             } catch (err) {
-                throw new HTTPError(err.message, err.constructor.name, err.status, request);
+                throw new RequestError(err.message, err.constructor.name, err.status, request);
             }
-            throw new DiscordAPIError(data, res.status, request);
+            throw new DiscordError(data, res.status, request);
         }
         // Handle 5xx responses
         if (res.status >= 500 && res.status < 600) {
             // Retry the specified number of times for possible serverside issues
             if (request.retries === this.manager.client.options.retryLimit)
-                throw new HTTPError(res.statusText, res.constructor.name, res.status, request);
+                throw new RequestError(res.statusText, res.constructor.name, res.status, request);
             request.retries++;
             return this.execute(request);
         }
@@ -161,4 +165,4 @@ class RequestHandler {
     }
 }
 
-module.exports = RequestHandler;
+export default RequestHandler;

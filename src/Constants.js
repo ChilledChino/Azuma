@@ -1,10 +1,9 @@
 const OP = 'AZUMA';
 
-module.exports = {
+export default {
     OP,
     DefaultOptions: {
-        handlerSweepInterval: 120000,
-        hashInactiveTimeout: 240000,
+        inactiveTimeout: 240000,
         requestOffset: 500
     },
     Events: {
@@ -13,7 +12,7 @@ module.exports = {
         ON_TOO_MANY_REQUEST: 'onTooManyRequest'
     },
     createHandler: (manager, handler) => {
-        const global = !!manager.timeout;
+        const global = manager.timeout !== 0;
         const timeout = global ? manager.globalTimeout : handler.timeout;
         return {
             limit: handler.limit,

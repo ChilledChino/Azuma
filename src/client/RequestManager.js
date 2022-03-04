@@ -1,11 +1,12 @@
-const { Collection } = require('@discordjs/collection');
-const { Constants } = require('discord.js');
-const { resolve } = require('path');
-const { createFetchHashMessage, createFetchHandlerMessage, createUpdateHandlerMessage }= require('../Constants.js');
-const EventEmitter = require('events');
-const RequestHandler = require('./RequestHandler.js');
-const Router = require('./Router.js');
-const APIRequest = require(resolve(require.resolve('discord.js').replace('index.js', '/rest/APIRequest.js')));
+import EventEmitter from 'events';
+import Https from 'https';
+
+import { LimitedCollection, Constants as DiscordConstants } from 'discord.js';
+
+import AzumaConstants from '../Constants.js';
+import DiscordRequest from './structures/DiscordRequest.js';
+import RequestHandler from './RequestHandler.js';
+import Router from './Router.js';
 
 /**
  * The parameter emitted in onRequest, onResponse, onTooManyRequest events
@@ -21,9 +22,9 @@ const APIRequest = require(resolve(require.resolve('discord.js').replace('index.
 class RequestManager extends EventEmitter {
     /**
      * @param {DiscordClient} client The client for this request manager
-     * @param {number} interval The interval ms for the handler sweeper for this request manager
+     * @param {number} lifetime The TTL for ratelimit handlers
      */
-    constructor(client, interval) {
+    constructor(client) {
         super();
         /**
          * Emitted when a request was made
@@ -55,19 +56,14 @@ class RequestManager extends EventEmitter {
         this.versioned = true;
         /**
          * The request handlers that this request manager handles
-         * @type {Collection<string, RequestHandler>}
+         * @type {LimitedCollection<string, RequestHandler>}
          */
-        this.handlers = new Collection();
+        this.handlers = new LimitedCollection({ sweepInterval: 60, sweepFilter: () => handler => handler.inactive });
         /**
-         * Inactive handlers sweeper
-         * @type {Timeout|null}
+         * The agent used for this manager
+         * @type {Agent}
          */
-        this.sweeper = null;
-
-        if (interval > 0) {
-            this.sweeper = setInterval(() => this.handlers.sweep(handler => handler.inactive), interval);
-            this.sweeper.unref();
-        }
+        this.agent = new Https.Agent({ ...client.options.http.agent, keepAlive: true });
     }
     /**
      * The client for the IPC
@@ -91,7 +87,7 @@ class RequestManager extends EventEmitter {
      * @readonly
      */
     get cdn() {
-        return Constants.Endpoints.CDN(this.client.options.http.cdn);
+        return DiscordConstants.Endpoints.CDN(this.client.options.http.cdn);
     }
     /**
      * Sets the endpoint for http api
@@ -118,7 +114,7 @@ class RequestManager extends EventEmitter {
      * @returns {Promise<string>}
      */
     fetchHash(id) {
-        return this.server.send(createFetchHashMessage(id), { receptive: true });
+        return this.server.send(AzumaConstants.createFetchHashMessage(id), { receptive: true });
     }
     /**
      * Gets a cached ratelimit info in central cache
@@ -126,7 +122,7 @@ class RequestManager extends EventEmitter {
      * @returns {Promise<*>}
      */
     fetchInfo(...args) {
-        return this.server.send(createFetchHandlerMessage(...args), { receptive: true });
+        return this.server.send(AzumaConstants.createFetchHandlerMessage(...args), { receptive: true });
     }
     /**
      * Updates a cached ratelimit info in central cache
@@ -134,10 +130,10 @@ class RequestManager extends EventEmitter {
      * @returns {Promise<void>}
      */
     updateInfo(...args) {
-        return this.server.send(createUpdateHandlerMessage(...args), { receptive: true });
+        return this.server.send(AzumaConstants.createUpdateHandlerMessage(...args), { receptive: true });
     }
     /**
-     * Gets a specific handler from cache
+     * Executes a request
      * @param {string} method
      * @param {route} route
      * @param {Object} data
@@ -145,13 +141,14 @@ class RequestManager extends EventEmitter {
      */
     async request(method, route, options = {}) {
         const hash = await this.fetchHash(`${method}:${options.route}`) ?? `Global(${method}:${options.route})`;
+        if (hash.startsWith('Global')) options.major = 'id';
         let handler = this.handlers.get(`${hash}:${options.major}`);
         if (!handler) {
             handler = new RequestHandler(this, hash, options);
             this.handlers.set(handler.id, handler);
         }
-        return handler.push(new APIRequest(this, method, route, options));
+        return handler.push(new DiscordRequest(this, method, route, options));
     }
 }
 
-module.exports = RequestManager;
+export default RequestManager;

@@ -15,6 +15,21 @@ A package that actually syncs your ratelimits across all your clusters on Discor
 
 ✅ Supports Discord.JS v13
 
+
+## NOTE
+
+> This library is now in "Maintenance" phase. I'm not gonna add new features on it. I'll just fix issues if there is but that's as far as I'll go.
+
+> You need to use [Kurasuta](https://github.com/DevYukine/Kurasuta) to make this work as this package depends on it
+
+> This is planned to use `@discordjs/sharder` once it's ready. That's the last update and marks the v4 release
+
+> v1.x.x initial release (Latest in 1x branch is version: 1.1.0)
+
+> v2.x.x drops support for Discord.JS v12 (Latest in 2x branch is version: 2.1.2)
+
+> v3.x.x makes the package ESM only (Current)
+
 ## Installation
 
 > npm i --save azuma
@@ -23,36 +38,28 @@ A package that actually syncs your ratelimits across all your clusters on Discor
 
 > https://deivu.github.io/Azuma/?api
 
-## TODO
-
-* Support for `options.invalidRequestWarningInterval`
-
-* Support for `options.restGlobalRateLimit`
-
-* Support for `options.rejectOnRateLimit`
-
 ## Support
 > https://discord.gg/FVqbtGu `#development` channel
 
 ## Example
-> Running Azuma is the same with [Kurasuta](https://github.com/Deivu/Kurasuta#example), except on you need to change your index.js based on example below
+> Running Azuma is the same with [Kurasuta](https://github.com/DevYukine/Kurasuta#example), except on you need to change your index.js based on example below
 
 ## Example of index.js
 ```js
-const { join } = require('path');
-const { Azuma } = require('azuma');
-const YourBotClient = require('./YourBotClient.js')
+import { Azuma } from 'azuma';
+import { Client } = from 'discord.js';
+
 const KurasutaOptions = {
     client: YourBotClient,
     timeout: 90000,
     token: 'idk'
 };
 const AzumaOptions = {
-    handlerSweepInterval: 150000,
-    hashInactiveTimeout: 300000,
+    inactiveTimeout: 300000,
     requestOffset: 500
 };
-const azuma = new Azuma(join(__dirname, 'YourBaseCluster.js'), KurasutaOptions, AzumaOptions);
+// Initialize Azuma
+const azuma = new Azuma(new URL('BaseCluster.js', import.meta.url), KurasutaOptions, AzumaOptions);
 // If you need to access the Kurasuta Sharding Manager, example, you want to listen to shard ready event
 azuma.manager.on('shardReady', id => console.log(`Shard ${id} is now ready`));
 // Call spawn from azuma, not from kurasuta
@@ -62,13 +69,14 @@ azuma.spawn();
 ## Pro Tip
 > Azuma also exposes when a request was made, when a response from a request is received, and if you hit an actual 429 via an event emitter, which you can use to make metrics on
 ```js
-const { Client } = require('discord.js');
+import { Client } = from 'discord.js';
+
 class Example extends Client {
-  constructor(...args) {
-    super();
+  login() {
     this.rest.on('onRequest', ({ request }) => /* do some parses on your thing for metrics or log it idk */);
     this.rest.on('onResponse', ({ request, response }) => /* do some parses on your thing for metrics or log it idk */);
     this.rest.on('onTooManyRequest', ({ request, response }) => /* do some probably, warning logs here? since this is an actual 429 and can get you banned for an hour */);
+    return super.login('token');
   }
 }
 ```
